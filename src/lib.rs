@@ -76,56 +76,78 @@ impl Display for MallocCtrlError {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Arena {
-    id: u32,
-}
+pub struct Arena(u32);
 
 impl Arena {
     pub fn with_hooks(hooks: &'static extent_hooks_t) -> Result<Self, MallocCtrlError> {
-        Ok(Self {
-            id: unsafe {
-                invoke_mallctl(
-                    "arenas.create",
-                    hooks as *const _ as *mut extent_hooks_t as *mut _,
-                    size_of::<extent_hooks_t>(),
-                )?
-            },
-        })
+        Ok(Self(unsafe {
+            let newp = &mut (hooks as *const _) as *mut *const extent_hooks_t as *mut _;
+            invoke_mallctl("arenas.create", newp, size_of::<*mut extent_hooks_t>())?
+        }))
     }
 }
 
 impl Arena {
-    pub fn free(self, ptr: &mut libc::c_void) {
-        unsafe {
-            rog_free(ptr);
-        }
+    /// Free a block of memory.
+    ///
+    /// # Safety
+    ///
+    /// Caller of this function is responsible for the validity of ptr.
+    pub unsafe fn free(self, ptr: *mut libc::c_void) {
+        rog_free(ptr);
     }
 
-    pub fn malloc_with_tcache(
+    /// Allocate a block of memory with specified TCache.
+    ///
+    /// # Safety
+    ///
+    /// Memory allocated by this function is not managed by Rust, user must be careful
+    /// to avoid memory leaks.
+    pub unsafe fn malloc_with_tcache(
         self,
         size: usize,
         align: usize,
         tcache: TCache,
     ) -> *mut libc::c_void {
-        unsafe {
-            rog_mallocx(
-                size,
-                MALLOCX_ARENA(self.id) | MALLOCX_TCACHE(tcache.id) | MALLOCX_ALIGN(align),
-            )
-        }
+        rog_mallocx(
+            size,
+            MALLOCX_ARENA(self.0) | MALLOCX_TCACHE(tcache.0) | MALLOCX_ALIGN(align),
+        )
+    }
+}
+
+impl From<u32> for Arena {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Arena> for u32 {
+    fn from(value: Arena) -> Self {
+        value.0
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct TCache {
-    id: u32,
-}
+pub struct TCache(u32);
 
 impl TCache {
     pub fn new() -> Result<Self, MallocCtrlError> {
-        Ok(Self {
-            id: unsafe { invoke_mallctl("tcache.create", null_mut(), 0)? },
-        })
+        Ok(Self(unsafe {
+            invoke_mallctl("tcache.create", null_mut(), 0)?
+        }))
+    }
+}
+
+impl From<u32> for TCache {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<TCache> for u32 {
+    fn from(value: TCache) -> Self {
+        value.0
     }
 }
 
